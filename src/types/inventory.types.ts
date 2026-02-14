@@ -24,20 +24,25 @@ export interface Color {
 
 export interface ProductoVariante {
     idProductoVariante?: number;
+    idProducto?: number; // FK al producto padre
     talla: Talla;
     color: Color;
     cantidad: number;
     codigoBarrasVariante?: string;
 }
 
+// Type unions para enums del backend
+export type SexoType = 'HOMBRE' | 'MUJER' | 'UNISEX';
+export type TipoPublicoType = 'ADULTO' | 'NINO' | 'BEBE';
+
 export interface Producto {
     idProducto?: number;
     codigoIdentificacion: string; // SKU o Código Interno
-    codigoBarras?: string;
+    codigoBarras?: string;       // EAN-8 generado por backend
     nombre: string;
     marca: string;
-    sexo: string; // 'HOMBRE', 'MUJER', 'UNISEX'
-    tipoPublico: string; // 'ADULTO', 'NIÑO'
+    sexo: SexoType;
+    tipoPublico: TipoPublicoType;
 
     // Precios
     precioUnitario: number;
