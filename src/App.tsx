@@ -3,6 +3,7 @@ import { DashboardPage } from "./pages/DashboardPage";
 import InventoryPage from "./pages/InventoryPage";
 import MovementsPage from "./pages/MovementsPage";
 import ManagementPage from "./pages/ManagementPage";
+import PrintLabelsPage from "./pages/PrintLabelsPage";
 import MainLayout from "./layouts/MainLayout";
 import ProtectedRoute from "./components/ProtectedRoute";
 import { Toaster } from "@/components/ui/sonner";
@@ -53,6 +54,14 @@ function App() {
               <ProtectedRoute>
                 <MainLayout>
                   <ManagementPage />
+                </MainLayout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/print-labels" element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <PrintLabelsPage />
                 </MainLayout>
               </ProtectedRoute>
             } />

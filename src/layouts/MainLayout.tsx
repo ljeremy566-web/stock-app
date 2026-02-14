@@ -9,7 +9,8 @@ import {
     Menu,
     X,
     ChevronRight,
-    Settings2
+    Settings2,
+    Tags
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -50,6 +51,11 @@ export default function MainLayout({ children }: PropsWithChildren) {
             path: '/management',
             label: 'Gestión',
             icon: <Settings2 size={22} />
+        },
+        {
+            path: '/print-labels',
+            label: 'Etiquetas',
+            icon: <Tags size={22} />
         },
     ];
 

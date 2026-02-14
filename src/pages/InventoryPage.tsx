@@ -1,19 +1,19 @@
 import { useState } from 'react';
-import { useProducts, useDeleteProduct } from '@/hooks/useProducts';
-import { Producto } from '@/types/inventory.types';
-import { ProductForm } from '@/features/inventory/components/ProductForm';
-import {
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow
-} from '@/components/ui/table';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import { Plus, Search, Filter, X, ShoppingBag } from 'lucide-react'; // Iconos
+import { useProducts, useDeleteProduct } from '@/hooks/useProducts'; // Hooks de productos
+import { useCategoriasPrincipales } from '@/hooks/useCategories'; // [!code ++] Hook Categorías
+import { useProveedores } from '@/hooks/useMasters'; // [!code ++] Hook Proveedores
+
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue
+} from '@/components/ui/select'; // [!code ++] Componentes Select
 import {
     Dialog,
     DialogContent,
@@ -22,267 +22,233 @@ import {
     DialogTitle,
     DialogTrigger
 } from '@/components/ui/dialog';
-import {
-    AlertDialog,
-    AlertDialogAction,
-    AlertDialogCancel,
-    AlertDialogContent,
-    AlertDialogDescription,
-    AlertDialogFooter,
-    AlertDialogHeader,
-    AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuSeparator,
-    DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Loader2, Plus, RefreshCw, Search, Box, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox'; // [!code ++] Checkbox para stock bajo
+import { Label } from '@/components/ui/label';
+
+import { ProductTable } from '@/features/inventory/components/ProductTable';
+import { ProductForm } from '@/features/inventory/components/ProductForm';
+import { Producto, Categoria, Proveedor } from '@/types/inventory.types';
 import { toast } from 'sonner';
 
 export default function InventoryPage() {
-    const { data: products = [], isLoading, refetch } = useProducts();
+    // 1. DATA
+    const { data: products = [], isLoading } = useProducts();
     const deleteProduct = useDeleteProduct();
 
+    // [!code ++] Cargamos listas para los filtros
+    const { data: categorias = [] } = useCategoriasPrincipales();
+    const { data: proveedores = [] } = useProveedores();
+
+    // 2. ESTADOS DE FILTRO
     const [searchTerm, setSearchTerm] = useState('');
+    const [filterCategory, setFilterCategory] = useState<string>('ALL'); // 'ALL' o ID
+    const [filterProvider, setFilterProvider] = useState<string>('ALL'); // 'ALL' o ID
+    const [filterLowStock, setFilterLowStock] = useState<boolean>(false); // Solo bajo stock
+
     const [isCreateOpen, setIsCreateOpen] = useState(false);
-    const [isEditOpen, setIsEditOpen] = useState(false);
-    const [selectedProduct, setSelectedProduct] = useState<Producto | null>(null);
-    const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; product: Producto | null }>({
-        open: false,
-        product: null
+    const [editingProduct, setEditingProduct] = useState<Producto | undefined>(undefined);
+
+    // 3. LÓGICA DE FILTRADO MAESTRA
+    const filteredProducts = products.filter((product) => {
+        // A. Filtro por Texto (Nombre o Código)
+        const matchSearch =
+            product.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            product.codigoIdentificacion.toLowerCase().includes(searchTerm.toLowerCase());
+
+        // B. Filtro por Categoría
+        const matchCategory =
+            filterCategory === 'ALL' ||
+            product.categoriaPadre?.idCategoria.toString() === filterCategory;
+
+        // C. Filtro por Proveedor
+        const matchProvider =
+            filterProvider === 'ALL' ||
+            product.proveedor?.idProveedor.toString() === filterProvider;
+
+        // D. Filtro por Stock Bajo (Menor o igual a 5 unidades)
+        // Nota: Si el producto tiene variantes, sumamos su stock total.
+        const stockTotal = product.cantidad ?? 0;
+        const matchStock = !filterLowStock || stockTotal <= 5;
+
+        return matchSearch && matchCategory && matchProvider && matchStock;
     });
 
-    // Filtrar productos
-    const filteredProducts = products.filter((p: Producto) =>
-        p.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        p.codigoIdentificacion.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-
-    // Callback cuando se crea un producto exitosamente
-    const handleSuccessCreate = () => {
-        setIsCreateOpen(false);
-    };
-
-    // Callback cuando se edita un producto exitosamente
-    const handleSuccessEdit = () => {
-        setIsEditOpen(false);
-        setSelectedProduct(null);
-    };
-
-    // Abrir modal de edición
-    const openEditModal = (product: Producto) => {
-        setSelectedProduct(product);
-        setIsEditOpen(true);
-    };
-
-    // Confirmar eliminación
-    const confirmDelete = async () => {
-        if (deleteDialog.product?.idProducto) {
+    // Manejadores de acciones
+    const handleDelete = async (ids: number[]) => {
+        if (confirm(`¿Estás seguro de eliminar ${ids.length} producto(s)? Esta acción no se puede deshacer.`)) {
             try {
-                await deleteProduct.mutateAsync(deleteDialog.product.idProducto);
-                toast.success('Producto eliminado', {
-                    description: `"${deleteDialog.product.nombre}" ha sido eliminado.`
-                });
+                // Ejecutamos todas las eliminaciones en paralelo
+                await Promise.all(ids.map(id => deleteProduct.mutateAsync(id)));
+                toast.success('Productos eliminados correctamente');
             } catch (error) {
-                toast.error('Error al eliminar', {
-                    description: 'No se pudo eliminar el producto. Intenta de nuevo.'
-                });
+                toast.error('Error al eliminar', { description: 'Algunos productos no pudieron ser eliminados.' });
             }
         }
-        setDeleteDialog({ open: false, product: null });
     };
+
+    const handleEdit = (product: Producto) => {
+        setEditingProduct(product);
+        setIsCreateOpen(true);
+    };
+
+    // FUNCIÓN DE DUPLICACIÓN
+    const handleDuplicate = (product: Producto) => {
+        // Preparamos el producto para ser una "copia"
+        const copy: Producto = {
+            ...product,
+            idProducto: undefined, // Importante: Sin ID para que sea uno nuevo
+            codigoIdentificacion: `${product.codigoIdentificacion}-CP`, // Sugerencia de código
+            nombre: `${product.nombre} (Copia)`,
+            variantes: [], // Opcional: ¿Quieres copiar las variantes con stock 0? Mejor vacío por seguridad
+            cantidad: 0 // Stock a 0
+        };
+
+        // Abrimos el modal con los datos precargados
+        setEditingProduct(copy);
+        setIsCreateOpen(true);
+        toast.info("Modo Duplicación", { description: "Estás creando una copia. Revisa el código y stock." });
+    };
+
+    // [!code ++] Resetear filtros
+    const clearFilters = () => {
+        setSearchTerm('');
+        setFilterCategory('ALL');
+        setFilterProvider('ALL');
+        setFilterLowStock(false);
+    };
+
+    const hasActiveFilters = searchTerm || filterCategory !== 'ALL' || filterProvider !== 'ALL' || filterLowStock;
 
     return (
         <div className="space-y-6">
-            {/* AlertDialog para confirmar eliminación */}
-            <AlertDialog open={deleteDialog.open} onOpenChange={(open) => !open && setDeleteDialog({ ...deleteDialog, open: false })}>
-                <AlertDialogContent>
-                    <AlertDialogHeader>
-                        <AlertDialogTitle>¿Eliminar producto?</AlertDialogTitle>
-                        <AlertDialogDescription>
-                            Estás a punto de eliminar <strong>"{deleteDialog.product?.nombre}"</strong>.
-                            Esta acción no se puede deshacer y eliminará todo el historial de stock asociado.
-                        </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                        <AlertDialogAction
-                            onClick={confirmDelete}
-                            className="bg-red-600 hover:bg-red-700"
-                            disabled={deleteProduct.isPending}
-                        >
-                            {deleteProduct.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                            Eliminar
-                        </AlertDialogAction>
-                    </AlertDialogFooter>
-                </AlertDialogContent>
-            </AlertDialog>
-
+            {/* Encabezado */}
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight text-slate-900">Inventario</h1>
-                    <p className="text-slate-500">Gestión total del stock del almacén.</p>
+                    <p className="text-slate-500">Gestión general de productos y existencias.</p>
                 </div>
-
-                {/* --- BOTÓN NUEVO PRODUCTO CON MODAL --- */}
-                <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+                <Dialog open={isCreateOpen} onOpenChange={(open) => { setIsCreateOpen(open); if (!open) setEditingProduct(undefined); }}>
                     <DialogTrigger asChild>
-                        <Button className="bg-blue-600 hover:bg-blue-700 shadow-md transition-all">
+                        <Button className="bg-blue-600 hover:bg-blue-700 shadow-sm">
                             <Plus className="mr-2 h-4 w-4" /> Nuevo Producto
                         </Button>
                     </DialogTrigger>
-                    <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
+                    <DialogContent className="w-[95vw] max-w-5xl max-h-[90vh] overflow-y-auto overflow-x-hidden">
                         <DialogHeader>
-                            <DialogTitle>Registrar Nuevo Producto</DialogTitle>
+                            <DialogTitle>{editingProduct ? 'Editar Producto' : 'Crear Nuevo Producto'}</DialogTitle>
                             <DialogDescription>
-                                Completa la información del producto, sus precios y variantes (tallas/colores).
+                                Completa la información del producto. Los campos con * son obligatorios.
                             </DialogDescription>
                         </DialogHeader>
                         <ProductForm
-                            onSuccess={handleSuccessCreate}
+                            product={editingProduct}
+                            onSuccess={() => setIsCreateOpen(false)}
                             onCancel={() => setIsCreateOpen(false)}
                         />
                     </DialogContent>
                 </Dialog>
-
-                {/* --- MODAL DE EDICIÓN --- */}
-                <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
-                    <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
-                        <DialogHeader>
-                            <DialogTitle>Editar Producto</DialogTitle>
-                            <DialogDescription>
-                                Modifica la información del producto "{selectedProduct?.nombre}".
-                            </DialogDescription>
-                        </DialogHeader>
-                        {selectedProduct && (
-                            <ProductForm
-                                product={selectedProduct}
-                                onSuccess={handleSuccessEdit}
-                                onCancel={() => setIsEditOpen(false)}
-                            />
-                        )}
-                    </DialogContent>
-                </Dialog>
             </div>
 
-            <Card className="shadow-sm border-slate-200">
-                <CardHeader className="pb-3">
-                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                        <CardTitle className="text-lg font-semibold">Listado de Productos</CardTitle>
-                        <div className="flex gap-2 w-full sm:w-auto">
-                            <div className="relative flex-1 sm:w-64">
-                                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
+            {/* [!code ++] BARRA DE FILTROS AVANZADA */}
+            <Card className="border-slate-200 shadow-sm">
+                <CardHeader className="pb-3 border-b bg-slate-50/50">
+                    <CardTitle className="text-sm font-medium flex items-center gap-2 text-slate-600">
+                        <Filter className="h-4 w-4" /> Filtros de Búsqueda
+                    </CardTitle>
+                </CardHeader>
+                <CardContent className="pt-4">
+                    <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+
+                        {/* 1. Buscador (Ocupa más espacio) */}
+                        <div className="md:col-span-4 space-y-2">
+                            <Label className="text-xs font-semibold text-slate-500">BUSCAR</Label>
+                            <div className="relative">
+                                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
                                 <Input
-                                    placeholder="Buscar por nombre, código..."
+                                    placeholder="Nombre, SKU o Código..."
+                                    className="pl-9"
                                     value={searchTerm}
                                     onChange={(e) => setSearchTerm(e.target.value)}
-                                    className="pl-10"
                                 />
                             </div>
-                            <Button variant="outline" size="icon" onClick={() => refetch()} disabled={isLoading}>
-                                <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
-                            </Button>
+                        </div>
+
+                        {/* 2. Filtro Categoría */}
+                        <div className="md:col-span-3 space-y-2">
+                            <Label className="text-xs font-semibold text-slate-500">CATEGORÍA</Label>
+                            <Select value={filterCategory} onValueChange={setFilterCategory}>
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Todas" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="ALL">Todas las Categorías</SelectItem>
+                                    {categorias.map((cat: Categoria) => (
+                                        <SelectItem key={cat.idCategoria} value={cat.idCategoria.toString()}>
+                                            {cat.nombre}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+
+                        {/* 3. Filtro Proveedor */}
+                        <div className="md:col-span-3 space-y-2">
+                            <Label className="text-xs font-semibold text-slate-500">PROVEEDOR</Label>
+                            <Select value={filterProvider} onValueChange={setFilterProvider}>
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Todos" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="ALL">Todos los Proveedores</SelectItem>
+                                    {proveedores.map((prov: Proveedor) => (
+                                        <SelectItem key={prov.idProveedor} value={prov.idProveedor.toString()}>
+                                            {prov.nombre}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+
+                        {/* 4. Filtro Stock Bajo + Reset */}
+                        <div className="md:col-span-2 flex items-center justify-between gap-2 h-10">
+                            <div className="flex items-center space-x-2 border p-2 rounded-md bg-white hover:bg-slate-50 cursor-pointer w-full justify-center" onClick={() => setFilterLowStock(!filterLowStock)}>
+                                <Checkbox id="low-stock" checked={filterLowStock} onCheckedChange={(c) => setFilterLowStock(!!c)} />
+                                <label
+                                    htmlFor="low-stock"
+                                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer text-red-600"
+                                >
+                                    Stock Bajo
+                                </label>
+                            </div>
+
+                            {hasActiveFilters && (
+                                <Button variant="ghost" size="icon" onClick={clearFilters} title="Limpiar filtros">
+                                    <X className="h-4 w-4 text-slate-500" />
+                                </Button>
+                            )}
                         </div>
                     </div>
-                </CardHeader>
-                <CardContent>
+                </CardContent>
+            </Card>
+
+            {/* Resultados y Tabla */}
+            <Card className="border-slate-200 shadow-sm">
+                <CardContent className="p-0">
                     {isLoading ? (
-                        <div className="flex justify-center items-center py-12">
-                            <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
-                        </div>
+                        <div className="p-12 text-center text-slate-500">Cargando inventario...</div>
                     ) : (
-                        <div className="overflow-x-auto rounded-md border">
-                            <Table>
-                                <TableHeader className="bg-slate-50">
-                                    <TableRow>
-                                        <TableHead className="w-[80px]">Código</TableHead>
-                                        <TableHead>Producto</TableHead>
-                                        <TableHead>Categoría</TableHead>
-                                        <TableHead>Precios (Unit / Doc)</TableHead>
-                                        <TableHead className="text-right">Stock Total</TableHead>
-                                        <TableHead className="text-center">Estado</TableHead>
-                                        <TableHead className="w-[80px] text-center">Acciones</TableHead>
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {filteredProducts.length === 0 ? (
-                                        <TableRow>
-                                            <TableCell colSpan={7} className="h-32 text-center text-slate-500">
-                                                <div className="flex flex-col items-center justify-center">
-                                                    <Box className="h-8 w-8 mb-2 opacity-20" />
-                                                    No se encontraron productos.
-                                                </div>
-                                            </TableCell>
-                                        </TableRow>
-                                    ) : (
-                                        filteredProducts.map((product: Producto) => (
-                                            <TableRow key={product.idProducto} className="hover:bg-slate-50">
-                                                <TableCell className="font-mono text-xs font-medium text-slate-500">
-                                                    {product.codigoIdentificacion}
-                                                </TableCell>
-                                                <TableCell>
-                                                    <div className="font-medium text-slate-900">{product.nombre}</div>
-                                                    <div className="text-xs text-slate-500 flex gap-2">
-                                                        <span>{product.marca}</span>
-                                                        <span className="text-slate-300">•</span>
-                                                        <span>{product.sexo}</span>
-                                                    </div>
-                                                </TableCell>
-                                                <TableCell>
-                                                    <Badge variant="outline" className="font-normal text-slate-600">
-                                                        {product.categoria?.nombre || product.categoriaPadre?.nombre || 'General'}
-                                                    </Badge>
-                                                </TableCell>
-                                                <TableCell className="text-sm">
-                                                    <div className="flex flex-col">
-                                                        <span className="font-semibold text-slate-700">S/. {product.precioUnitario?.toFixed(2)}</span>
-                                                        <span className="text-xs text-slate-400">Doc: S/. {product.precioDocena?.toFixed(2)}</span>
-                                                    </div>
-                                                </TableCell>
-                                                <TableCell className="text-right font-bold text-slate-700 text-base">
-                                                    {product.cantidad ?? 0}
-                                                </TableCell>
-                                                <TableCell className="text-center">
-                                                    {(product.cantidad || 0) > 10 ? (
-                                                        <Badge className="bg-green-100 text-green-700 hover:bg-green-200 border-none">Stock Alto</Badge>
-                                                    ) : (product.cantidad || 0) > 0 ? (
-                                                        <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-200 border-none">Stock Bajo</Badge>
-                                                    ) : (
-                                                        <Badge className="bg-red-100 text-red-700 hover:bg-red-200 border-none">Agotado</Badge>
-                                                    )}
-                                                </TableCell>
-                                                <TableCell className="text-center">
-                                                    <DropdownMenu>
-                                                        <DropdownMenuTrigger asChild>
-                                                            <Button variant="ghost" size="icon" className="h-8 w-8">
-                                                                <MoreHorizontal className="h-4 w-4" />
-                                                            </Button>
-                                                        </DropdownMenuTrigger>
-                                                        <DropdownMenuContent align="end">
-                                                            <DropdownMenuItem onClick={() => openEditModal(product)}>
-                                                                <Pencil className="mr-2 h-4 w-4" />
-                                                                Editar
-                                                            </DropdownMenuItem>
-                                                            <DropdownMenuSeparator />
-                                                            <DropdownMenuItem
-                                                                onClick={() => setDeleteDialog({ open: true, product })}
-                                                                className="text-red-600 focus:text-red-600 focus:bg-red-50"
-                                                            >
-                                                                <Trash2 className="mr-2 h-4 w-4" />
-                                                                Eliminar
-                                                            </DropdownMenuItem>
-                                                        </DropdownMenuContent>
-                                                    </DropdownMenu>
-                                                </TableCell>
-                                            </TableRow>
-                                        ))
-                                    )}
-                                </TableBody>
-                            </Table>
-                        </div>
+                        <>
+                            <div className="p-2 border-b bg-slate-50 text-xs text-right text-slate-500 px-4">
+                                Mostrando <strong>{filteredProducts.length}</strong> productos
+                                {hasActiveFilters && <span> (filtrado de {products.length})</span>}
+                            </div>
+                            <ProductTable
+                                products={filteredProducts}
+                                onDelete={handleDelete}
+                                onEdit={handleEdit}
+                                onDuplicate={handleDuplicate}
+                            />
+                        </>
                     )}
                 </CardContent>
             </Card>
